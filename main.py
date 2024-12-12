@@ -34,9 +34,10 @@ def db_create(db_connection):
 def provider_init():
     web3 = Web3(Web3.HTTPProvider(ETH_RPC))
 
-    print("Connected to provider:", web3.isConnected())
-
-    # Handle any connection exceptions here...
+    if web3.isConnected():
+        print("Connected to provider successfully!")
+    else:
+        print("Error connecting to provider...")
 
     return web3
 
@@ -48,11 +49,51 @@ def parse_abi():
 # -------------------- Indexer --------------------- #
 
 def index():
-    block_range = range(web3.eth.blockNumber - 2000, web3.eth.blockNumber)
+    N = 1
+    startBlock = web3.eth.blockNumber - N
+    endBlock = web3.eth.blockNumber
 
+    # StartBlock < 0 protection
+    #
+
+    # Last indexed block
+    #
+
+    # Get ABI transfer subset
+    for sub_abi in abi:
+        if sub_abi.get('name') == 'Transfer':
+            transferAbi = sub_abi
+
+    transfer_topic = event_abi_to_log_topic(transferAbi)
+
+    # Filter blocks
+    for block_number in range(startBlock, endBlock + 1):
+        logs = web3.eth.filter({
+            "fromBlock": block_number,
+            "toBlock": block_number,
+            "topics": [transfer_topic.hex()]
+        }).get_all_entries()
+
+        for log in logs:
+            if log['data'] == "0x":
+                # Skip invalid ERC20 transfers (no data value)
+                continue
+            else:
+                value = log['data']
+                from_address = '0x' + log['topics'][1].hex()[26:]
+                to_address   = '0x' + log['topics'][2].hex()[26:]
+                token_address = log['address']
+
+    
 
 # ---------------------- Main ---------------------- #
+
+# TODO:
+# - Add indexing for last 2000 blocks
+# - Make it index from the last indexed block + 1
 
 db_connection = db_init()
 web3 = provider_init()
 abi = parse_abi()
+
+index()
