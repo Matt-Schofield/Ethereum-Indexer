@@ -1,11 +1,9 @@
+import sys
 import json
 import sqlite3
 from web3 import Web3, EthereumTesterProvider
 from eth_abi import decode_abi
 from eth_utils import event_abi_to_log_topic
-
-# RPC URL
-ETH_RPC = "http://etharchivebware.upnode.org:7545"
 
 # -------------------- Database -------------------- #
 
@@ -19,6 +17,13 @@ def db_create(db_connection):
             token_address TEXT NOT NULL,
             balance TEXT NOT NULL,
             PRIMARY KEY (wallet_address, token_address)
+        );
+    """)
+
+    db_connection.execute("""
+        CREATE TABLE IF NOT EXISTS persistentMetadata (
+            key TEXT PRIMARY KEY,
+            value TEXT
         );
     """)
 
@@ -41,18 +46,37 @@ def update_db(val, f_add, t_add, tk_add):
 
     db_connection.commit() 
 
+def set_meta(key, value):
+    db_connection.execute("""
+        INSERT INTO persistentMetadata
+        VALUES (?, ?)    
+        ON CONFLICT(key) DO UPDATE SET
+            value=?              
+    """, (key, value, value))
+
+    db_connection.commit() 
+
+def get_meta(key):
+    res = db_connection.execute("""
+        SELECT value 
+        FROM persistentMetadata
+        WHERE key=?
+    """, ([key]))
+
+    return res.fetchone()[0]
+
+
 
 # --------------------- Setup ---------------------- #
 
-def provider_init():
-    web3 = Web3(Web3.HTTPProvider(ETH_RPC))
+def provider_init(eth_rpc):
+    web3 = Web3(Web3.HTTPProvider(eth_rpc))
 
     if web3.isConnected():
-        print("Connected to provider successfully!")
+        print("[PROG] Connected to provider successfully!")
+        return web3
     else:
-        print("Error connecting to provider...")
-
-    return web3
+        return False
 
 def parse_abi():
     f = open("./erc20.abi.json")
@@ -71,8 +95,14 @@ def index():
         startBlock = 0;
 
     # Start from one after last indexed block if applicable
+    last_indexed = int(get_meta("lastIndexed"))
+
+    print(last_indexed)
+
     if last_indexed > startBlock:
         startBlock = last_indexed + 1
+
+    print(startBlock, endBlock)
 
     # Get ABI transfer subset
     for sub_abi in abi:
@@ -94,6 +124,7 @@ def index():
         for log in logs:
             if log['data'] == "0x":
                 # Skip invalid ERC20 transfers (no data value)
+                # - Are "0x000...0000" wallet address considered valid?
                 continue
             else:
                 value = log['data']
@@ -104,7 +135,8 @@ def index():
                 update_db(value, from_address, to_address, token_address)
                 db_update_count += 1
 
-        last_indexed = block_number
+        set_meta("lastIndexed", block_number)
+
         print(f"[LOG] Indexed block {block_number}")
         print(f"[DATABASE] Upserted {db_update_count} DB entries")
 
@@ -112,12 +144,57 @@ def index():
     
 
 # ---------------------- Main ---------------------- #
+
+# TODO:
+# - Batch indexing?
+# - Continuous indexing?
+# - Interruption safety?
+# - Wallet queries
+
+# RPC: "http://etharchivebware.upnode.org:7545"
+
 last_indexed = None
 
 db_connection = db_init()
 db_create(db_connection)
 
-web3 = provider_init()
+set_meta("lastIndexed", -1)
+
 abi = parse_abi()
 
-index()
+while True:
+    cmd = input("> ")
+
+    cmd = cmd.split(" ")
+
+    if cmd[0] == "erc20index":
+        if len(cmd) != 3:
+            print(f"[PROG] Error: erc20index takes 3 parameters but only found only {len(cmd)}.")
+                    
+        if cmd[1] == "start":
+            web3 = provider_init(cmd[2])
+
+            if web3 == False:
+                print(f"[PROG] Error: Invalid RPC parameter.")
+            else:
+                print(f"[PROG] Beginning indexing...")
+                index()
+        
+        if cmd[1] == "query":
+            None
+
+    elif cmd[0] == "quit":
+        res = input("Are you sure you want to quit? Y/N: ")
+        if res == "y" or res == "Y":
+            break
+
+    elif cmd[0] == "help":
+        print(
+        """Commands:
+        help                        - Displays this message.
+        erc20index start [RPC]      - Begins indexing using given RPC.
+        erc20index start [Wallet]   - Queries given wallet balance
+        quit                        - Quits the programs
+        """)
+    else:
+        print(f"[PROG] Error: Unrecognised command")
