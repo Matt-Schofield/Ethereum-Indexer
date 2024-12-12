@@ -73,7 +73,7 @@ def provider_init(eth_rpc):
     web3 = Web3(Web3.HTTPProvider(eth_rpc))
 
     if web3.isConnected():
-        print("[PROG] Connected to provider successfully!")
+        # print("[PROG] Connected to provider successfully!")
         return web3
     else:
         return False
@@ -143,13 +143,73 @@ def index():
     db_connection.execute("SELECT * FROM balances")
     
 
+# -------------------- Queryer --------------------- #
+def query_wallet(wallet_address):
+    # This feels wrong but I think you need a provider to get the token 
+    # info so I don't see another way
+    web3 = provider_init("http://etharchivebware.upnode.org:7545")
+
+    res = db_connection.execute("""
+        SELECT token_address, balance 
+        FROM balances
+        WHERE wallet_address=?
+    """, ([wallet_address]))
+
+    res = res.fetchall()
+
+    # Counter for formatting output nicely
+    count = 0
+
+    print("=" * 60)
+    print(f"In Wallet ID: {wallet_address}")
+    print("-" * 60)
+
+    for row in res:
+        count += 1
+
+        # Fetch token info
+        tokenContract = web3.eth.contract(row[0], abi=abi)
+
+        name     = tokenContract.functions.name().call()
+        symbol   = tokenContract.functions.symbol().call()
+        decimals = tokenContract.functions.decimals().call()
+
+        # Couldn't get this to work...
+        # batch = web3.batch_requests()
+
+        # batch.add(tokenContract.functions.name())
+        # batch.add(tokenContract.functions.symbol())
+        # batch.add(tokenContract.functions.decimals())
+
+        # responses = batch.execute()
+        # assert len(responses) == 3
+
+        # name     = responses[0]
+        # symbol   = responses[1]
+        # decimals = responses[2]
+
+        # Balance number formatting
+        balance = str(int(row[1], 16))
+        if len(balance) <= decimals:
+            # Voodoo magic to handle display in case the balance is less than 1 unit
+            balance = ("0" * (decimals - len(balance))) + "0" + balance
+        balance = balance[:len(balance)-decimals] + "." + balance[-decimals:]
+
+        print(f"Coin #{count}")
+        print(f"- Name: {name} \n- Symbol: {symbol} \n- Balance: {balance}")
+
+    if count == 0:
+        print("No tokens in this wallet.")
+
+    print("-" * 60)
+
+
 # ---------------------- Main ---------------------- #
 
 # TODO:
 # - Batch indexing?
 # - Continuous indexing?
 # - Interruption safety?
-# - Wallet queries
 
 # RPC: "http://etharchivebware.upnode.org:7545"
 
@@ -162,6 +222,8 @@ set_meta("lastIndexed", -1)
 
 abi = parse_abi()
 
+# "0x1f57af9d44b6bf3c5cc74c94eef26e4c7c9838d2"
+
 while True:
     cmd = input("> ")
 
@@ -169,32 +231,32 @@ while True:
 
     if cmd[0] == "erc20index":
         if len(cmd) != 3:
-            print(f"[PROG] Error: erc20index takes 3 parameters but only found only {len(cmd)}.")
-                    
-        if cmd[1] == "start":
+            print(f"[PROG] Error: erc20index takes 3 parameters but only found only {len(cmd)}.")           
+        # ------------------
+        elif cmd[1] == "start":
             web3 = provider_init(cmd[2])
-
             if web3 == False:
                 print(f"[PROG] Error: Invalid RPC parameter.")
             else:
                 print(f"[PROG] Beginning indexing...")
                 index()
-        
-        if cmd[1] == "query":
-            None
-
+        # ------------------
+        elif cmd[1] == "query":
+            query_wallet(cmd[2])
+    # ------------------
     elif cmd[0] == "quit":
         res = input("Are you sure you want to quit? Y/N: ")
         if res == "y" or res == "Y":
             break
-
+    # ------------------
     elif cmd[0] == "help":
         print(
         """Commands:
         help                        - Displays this message.
         erc20index start [RPC]      - Begins indexing using given RPC.
-        erc20index start [Wallet]   - Queries given wallet balance
+        erc20index query [Wallet]   - Queries given wallet balance
         quit                        - Quits the programs
         """)
+    # ------------------
     else:
         print(f"[PROG] Error: Unrecognised command")
