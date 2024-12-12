@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from web3 import Web3, EthereumTesterProvider
 from eth_abi import decode_abi
@@ -6,9 +7,7 @@ from eth_utils import event_abi_to_log_topic
 # RPC URL
 ETH_RPC = "http://etharchivebware.upnode.org:7545"
 
-web3 = Web3(Web3.HTTPProvider(ETH_RPC))
-print(web3.isConnected())
-# print(web3.eth.getBlock(web3.eth.blockNumber))
+# -------------------- Database -------------------- #
 
 def db_init():
     return sqlite3.connect("database.db")
@@ -29,4 +28,31 @@ def db_create(db_connection):
         );
     """)
 
+
+# --------------------- Setup ---------------------- #
+
+def provider_init():
+    web3 = Web3(Web3.HTTPProvider(ETH_RPC))
+
+    print("Connected to provider:", web3.isConnected())
+
+    # Handle any connection exceptions here...
+
+    return web3
+
+def parse_abi():
+    f = open("./erc20.abi.json")
+    return json.load(f)
+
+
+# -------------------- Indexer --------------------- #
+
+def index():
+    block_range = range(web3.eth.blockNumber - 2000, web3.eth.blockNumber)
+
+
+# ---------------------- Main ---------------------- #
+
 db_connection = db_init()
+web3 = provider_init()
+abi = parse_abi()
