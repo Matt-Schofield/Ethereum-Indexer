@@ -21,12 +21,25 @@ def db_create(db_connection):
             PRIMARY KEY (wallet_address, token_address)
         );
     """)
+
+def update_db(val, f_add, t_add, tk_add):
+    # Update sender wallet information
     db_connection.execute("""
-        CREATE TABLE IF NOT EXISTS meta (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        );
-    """)
+        INSERT INTO balances
+        VALUES (?,?,?)
+        ON CONFLICT(wallet_address, token_address) DO UPDATE SET
+            balance=?                          
+    """, (f_add, tk_add, val, val))
+
+    # Update receiver wallet information
+    db_connection.execute("""
+        INSERT INTO balances
+        VALUES (?,?,?) 
+        ON CONFLICT(wallet_address, token_address) DO UPDATE SET
+            balance=?               
+    """, (t_add, tk_add, val, val))
+
+    db_connection.commit() 
 
 
 # --------------------- Setup ---------------------- #
@@ -49,22 +62,24 @@ def parse_abi():
 # -------------------- Indexer --------------------- #
 
 def index():
-    N = 1
+    N = 1 # Change back to 2000
     startBlock = web3.eth.blockNumber - N
     endBlock = web3.eth.blockNumber
 
     # StartBlock < 0 protection
-    #
+    if startBlock < 0:
+        startBlock = 0;
 
-    # Last indexed block
-    #
+    # Start from one after last indexed block if applicable
+    if last_indexed > startBlock:
+        startBlock = last_indexed + 1
 
     # Get ABI transfer subset
     for sub_abi in abi:
         if sub_abi.get('name') == 'Transfer':
-            transferAbi = sub_abi
+            transfer_abi = sub_abi
 
-    transfer_topic = event_abi_to_log_topic(transferAbi)
+    transfer_topic = event_abi_to_log_topic(transfer_abi)
 
     # Filter blocks
     for block_number in range(startBlock, endBlock + 1):
@@ -73,6 +88,8 @@ def index():
             "toBlock": block_number,
             "topics": [transfer_topic.hex()]
         }).get_all_entries()
+
+        db_update_count = 0
 
         for log in logs:
             if log['data'] == "0x":
@@ -84,15 +101,22 @@ def index():
                 to_address   = '0x' + log['topics'][2].hex()[26:]
                 token_address = log['address']
 
+                update_db(value, from_address, to_address, token_address)
+                db_update_count += 1
+
+        last_indexed = block_number
+        print(f"[LOG] Indexed block {block_number}")
+        print(f"[DATABASE] Upserted {db_update_count} DB entries")
+
+    db_connection.execute("SELECT * FROM balances")
     
 
 # ---------------------- Main ---------------------- #
-
-# TODO:
-# - Add indexing for last 2000 blocks
-# - Make it index from the last indexed block + 1
+last_indexed = None
 
 db_connection = db_init()
+db_create(db_connection)
+
 web3 = provider_init()
 abi = parse_abi()
 
