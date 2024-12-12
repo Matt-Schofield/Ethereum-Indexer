@@ -86,7 +86,7 @@ def parse_abi():
 # -------------------- Indexer --------------------- #
 
 def index():
-    N = 1 # Change back to 2000
+    N = 20 # Change back to 2000
     startBlock = web3.eth.blockNumber - N
     endBlock = web3.eth.blockNumber
 
@@ -152,7 +152,7 @@ def index():
         set_meta("lastIndexed", block_number)
 
         print(f"[LOG] Indexed block {block_number}")
-        print(f"[DATABASE] Upserted {db_update_count} DB entries")
+        # print(f"[DATABASE] Upserted {db_update_count} DB entries")
 
     db_connection.execute("SELECT * FROM balances")
     
