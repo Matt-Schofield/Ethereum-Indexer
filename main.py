@@ -1,7 +1,7 @@
 import sys
 import json
 import sqlite3
-from web3 import Web3, EthereumTesterProvider
+from web3 import Web3
 from eth_abi import decode_abi
 from eth_utils import event_abi_to_log_topic
 
@@ -97,12 +97,8 @@ def index():
     # Start from one after last indexed block if applicable
     last_indexed = int(get_meta("lastIndexed"))
 
-    print(last_indexed)
-
     if last_indexed > startBlock:
         startBlock = last_indexed + 1
-
-    print(startBlock, endBlock)
 
     # Get ABI transfer subset
     for sub_abi in abi:
@@ -110,6 +106,11 @@ def index():
             transfer_abi = sub_abi
 
     transfer_topic = event_abi_to_log_topic(transfer_abi)
+
+    # Batching does not appear to be supported in Web3.py, only Web3.js?
+    # I could be wrong but I've tried everything I think I can at this point...
+
+    # batch = web3.eth.make_batch()
 
     # Filter blocks
     for block_number in range(startBlock, endBlock + 1):
@@ -119,6 +120,19 @@ def index():
             "topics": [transfer_topic.hex()]
         }).get_all_entries()
 
+    #     filter = web3.eth.filter({
+    #         "fromBlock": block_number,
+    #         "toBlock": block_number,
+    #         "topics": [transfer_topic.hex()]
+    #     })
+        
+    #     batch.add(filter.get_all_entries())
+
+    # logBatch = batch.execute()
+    # # assert...
+
+
+    # for logs in logBatch:
         db_update_count = 0
 
         for log in logs:
@@ -207,7 +221,6 @@ def query_wallet(wallet_address):
 # ---------------------- Main ---------------------- #
 
 # TODO:
-# - Batch indexing?
 # - Continuous indexing?
 # - Interruption safety?
 
