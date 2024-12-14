@@ -26,14 +26,23 @@ def db_create(db_connection):
         );
     """)
 
-def update_db(val, f_add, t_add, tk_add):
+def update_db(f_add, t_add, tk_add):
+    tokenContract = web3.eth.contract(tk_add, abi=abi)
+
+    f_balance = tokenContract.functions.balanceOf(web3.toChecksumAddress(f_add)).call()
+    t_balance = tokenContract.functions.balanceOf(web3.toChecksumAddress(t_add)).call()
+
+    # SQLite has an integer limit of 9223372036854775807 (2^63 - 1), so must be stored as string values
+    f_balance = str(f_balance)
+    t_balance = str(t_balance)
+
     # Update sender wallet information
     db_connection.execute("""
         INSERT INTO balances
         VALUES (?,?,?)
         ON CONFLICT(wallet_address, token_address) DO UPDATE SET
             balance=?                          
-    """, (f_add, tk_add, val, val))
+    """, (f_add, tk_add, f_balance, f_balance))
 
     # Update receiver wallet information
     db_connection.execute("""
@@ -41,7 +50,7 @@ def update_db(val, f_add, t_add, tk_add):
         VALUES (?,?,?) 
         ON CONFLICT(wallet_address, token_address) DO UPDATE SET
             balance=?               
-    """, (t_add, tk_add, val, val))
+    """, (t_add, tk_add, t_balance, t_balance))
 
     db_connection.commit() 
 
@@ -91,7 +100,7 @@ def check_params(cmd, n):
 
 # -------------------- Indexer --------------------- #
 def index():
-    N = 10 # Change back to 2000
+    N = 1 # Change back to 2000
     startBlock = web3.eth.blockNumber - N
     endBlock = web3.eth.blockNumber
 
@@ -100,7 +109,10 @@ def index():
         startBlock = 0;
 
     # Start from one after last indexed block if applicable
-    last_indexed = int(get_meta("lastIndexed"))
+    try:
+        last_indexed = int(get_meta("lastIndexed"))
+    except:
+        last_indexed = -1
 
     if last_indexed > startBlock:
         startBlock = last_indexed + 1
@@ -137,8 +149,6 @@ def index():
     #
     #
     # for logs in logBatch:
-        db_update_count = 0
-
         for log in logs:
             if log['data'] == "0x":
                 # Skip invalid ERC20 transfers (no data value)
@@ -149,8 +159,7 @@ def index():
                 to_address   = '0x' + log['topics'][2].hex()[26:]
                 token_address = log['address']
 
-                update_db(value, from_address, to_address, token_address)
-                db_update_count += 1
+                update_db(from_address, to_address, token_address)
 
         set_meta("lastIndexed", block_number)
 
@@ -186,6 +195,8 @@ def query_wallet(web3, wallet_address):
         symbol   = tokenContract.functions.symbol().call()
         decimals = tokenContract.functions.decimals().call()
 
+        raw_balance = tokenContract.functions.balanceOf(wallet_address).call()
+
         # Contract query batching (Web3.py v7.x.x only)
         #
         # batch = web3.batch_requests()
@@ -200,8 +211,12 @@ def query_wallet(web3, wallet_address):
         # symbol   = responses[1]
         # decimals = responses[2]
 
-        # Balance number formatting
-        balance = str(int(row[1], 16))
+        # Balance number formatting if balance is hex
+        if raw_balance.startswith('0x'):
+            balance = str(int(raw_balance, 16))
+        else:
+            balance = raw_balance
+
         if len(balance) <= decimals:
             # Voodoo magic to handle display in case the balance is less than 1 unit
             balance = ("0" * (decimals - len(balance))) + "0" + balance
@@ -221,11 +236,10 @@ db_connection = db_init()
 db_create(db_connection)
 
 # Fetch last indexed block if it exists
-last_indexed = int(get_meta("lastIndexed"))
-# try:
-#     last_indexed = int(get_meta("lastIndexed"))
-# except:
-#     last_indexed = -1
+try:
+    last_indexed = int(get_meta("lastIndexed"))
+except:
+    last_indexed = -1
 
 # Connect to default provider
 DEFAULT_PROVIDER = "http://etharchivebware.upnode.org:7545"
