@@ -195,7 +195,7 @@ def query_wallet(web3, wallet_address):
         symbol   = tokenContract.functions.symbol().call()
         decimals = tokenContract.functions.decimals().call()
 
-        raw_balance = tokenContract.functions.balanceOf(wallet_address).call()
+        raw_balance = tokenContract.functions.balanceOf(web3.toChecksumAddress(wallet_address)).call()
 
         # Contract query batching (Web3.py v7.x.x only)
         #
@@ -212,10 +212,10 @@ def query_wallet(web3, wallet_address):
         # decimals = responses[2]
 
         # Balance number formatting if balance is hex
-        if raw_balance.startswith('0x'):
+        if not isinstance(raw_balance, int):
             balance = str(int(raw_balance, 16))
         else:
-            balance = raw_balance
+            balance = str(raw_balance)
 
         if len(balance) <= decimals:
             # Voodoo magic to handle display in case the balance is less than 1 unit
