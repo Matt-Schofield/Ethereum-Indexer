@@ -91,7 +91,7 @@ def check_params(cmd, n):
 
 # -------------------- Indexer --------------------- #
 def index():
-    N = 20 # Change back to 2000
+    N = 10 # Change back to 2000
     startBlock = web3.eth.blockNumber - N
     endBlock = web3.eth.blockNumber
 
@@ -217,17 +217,20 @@ def query_wallet(web3, wallet_address):
 
 
 # ---------------------- Main ---------------------- #
-last_indexed = None
-
 db_connection = db_init()
 db_create(db_connection)
+
+# Fetch last indexed block if it exists
+last_indexed = int(get_meta("lastIndexed"))
+# try:
+#     last_indexed = int(get_meta("lastIndexed"))
+# except:
+#     last_indexed = -1
 
 # Connect to default provider
 DEFAULT_PROVIDER = "http://etharchivebware.upnode.org:7545"
 print("[PROG] Connecting to default provider...")
 web3 = provider_init(DEFAULT_PROVIDER)
-
-set_meta("lastIndexed", -1)
 
 abi = parse_abi()
 
@@ -244,15 +247,20 @@ while True:
                 continue
     
             # Change the provider if not connected already or if a different provider was passed to the CLI
-            if web3 == None or cmd[2] != DEFAULT_PROVIDER:
+            if web3 == None or (cmd[2] != DEFAULT_PROVIDER and cmd[2] != "default"):
                 web3 = provider_init(cmd[2])
 
                 # If the connection failed skip
                 if web3 == None:
                     continue
 
-            print("[PROG] Beginning indexing...")
-            index()
+            if input("Index continuously? Y/N: ").lower().startswith("y"):
+                print("[PROG] Beginning continuous indexing... (CLI provides no interrupt. Use Ctrl+C to stop program.)")
+                while True:
+                    index()
+            else:   
+                print("[PROG] Beginning one-time indexing...")
+                index()
 
         elif cmd[1] == "query":
             # Check number of params
