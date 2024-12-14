@@ -6,7 +6,6 @@ from eth_abi import decode_abi
 from eth_utils import event_abi_to_log_topic
 
 # -------------------- Database -------------------- #
-
 def db_init():
     return sqlite3.connect("database.db")
 
@@ -66,25 +65,31 @@ def get_meta(key):
     return res.fetchone()[0]
 
 
-
 # --------------------- Setup ---------------------- #
-
 def provider_init(eth_rpc):
     web3 = Web3(Web3.HTTPProvider(eth_rpc))
 
     if web3.isConnected():
-        # print("[PROG] Connected to provider successfully!")
+        print("[PROG] Connected to provider successfully!")
         return web3
     else:
-        return False
+        print("[PROG] Error: Failed to connect to provider.")
+        return None
 
 def parse_abi():
     f = open("./erc20.abi.json")
     return json.load(f)
 
+def check_params(cmd, n):
+    if len(cmd) != n:
+        # If the incorrect number of params was given skip
+        print(f"[PROG] Error: erc20index {cmd[1]} takes {n} parameters but found {len(cmd)}.")   
+        return False
+    else:
+        return True
+
 
 # -------------------- Indexer --------------------- #
-
 def index():
     N = 20 # Change back to 2000
     startBlock = web3.eth.blockNumber - N
@@ -107,11 +112,6 @@ def index():
 
     transfer_topic = event_abi_to_log_topic(transfer_abi)
 
-    # Batching does not appear to be supported in Web3.py, only Web3.js?
-    # I could be wrong but I've tried everything I think I can at this point...
-
-    # batch = web3.eth.make_batch()
-
     # Filter blocks
     for block_number in range(startBlock, endBlock + 1):
         logs = web3.eth.filter({
@@ -120,25 +120,28 @@ def index():
             "topics": [transfer_topic.hex()]
         }).get_all_entries()
 
+    # Filter request batching (Web3.py v7.x.x only)
+    #
+    # batch = web3.eth.make_batch()
+    #
     #     filter = web3.eth.filter({
     #         "fromBlock": block_number,
     #         "toBlock": block_number,
     #         "topics": [transfer_topic.hex()]
     #     })
-        
+    #
     #     batch.add(filter.get_all_entries())
-
+    #
     # logBatch = batch.execute()
     # # assert...
-
-
+    #
+    #
     # for logs in logBatch:
         db_update_count = 0
 
         for log in logs:
             if log['data'] == "0x":
                 # Skip invalid ERC20 transfers (no data value)
-                # - Are "0x000...0000" wallet address considered valid?
                 continue
             else:
                 value = log['data']
@@ -152,17 +155,12 @@ def index():
         set_meta("lastIndexed", block_number)
 
         print(f"[LOG] Indexed block {block_number}")
-        # print(f"[DATABASE] Upserted {db_update_count} DB entries")
 
     db_connection.execute("SELECT * FROM balances")
     
 
 # -------------------- Queryer --------------------- #
-def query_wallet(wallet_address):
-    # This feels wrong but I think you need a provider to get the token 
-    # info so I don't see another way
-    web3 = provider_init("http://etharchivebware.upnode.org:7545")
-
+def query_wallet(web3, wallet_address):
     res = db_connection.execute("""
         SELECT token_address, balance 
         FROM balances
@@ -188,16 +186,16 @@ def query_wallet(wallet_address):
         symbol   = tokenContract.functions.symbol().call()
         decimals = tokenContract.functions.decimals().call()
 
-        # Couldn't get this to work...
+        # Contract query batching (Web3.py v7.x.x only)
+        #
         # batch = web3.batch_requests()
-
+        #
         # batch.add(tokenContract.functions.name())
         # batch.add(tokenContract.functions.symbol())
         # batch.add(tokenContract.functions.decimals())
-
+        #
         # responses = batch.execute()
-        # assert len(responses) == 3
-
+        #
         # name     = responses[0]
         # symbol   = responses[1]
         # decimals = responses[2]
@@ -219,57 +217,71 @@ def query_wallet(wallet_address):
 
 
 # ---------------------- Main ---------------------- #
-
-# TODO:
-# - Continuous indexing?
-# - Interruption safety?
-
-# RPC: "http://etharchivebware.upnode.org:7545"
-
 last_indexed = None
 
 db_connection = db_init()
 db_create(db_connection)
 
+# Connect to default provider
+DEFAULT_PROVIDER = "http://etharchivebware.upnode.org:7545"
+print("[PROG] Connecting to default provider...")
+web3 = provider_init(DEFAULT_PROVIDER)
+
 set_meta("lastIndexed", -1)
 
 abi = parse_abi()
-
-# "0x1f57af9d44b6bf3c5cc74c94eef26e4c7c9838d2"
 
 while True:
     cmd = input("> ")
 
     cmd = cmd.split(" ")
 
+    # ======== erc20index ========
     if cmd[0] == "erc20index":
-        if len(cmd) != 3:
-            print(f"[PROG] Error: erc20index takes 3 parameters but only found only {len(cmd)}.")           
-        # ------------------
-        elif cmd[1] == "start":
-            web3 = provider_init(cmd[2])
-            if web3 == False:
-                print(f"[PROG] Error: Invalid RPC parameter.")
-            else:
-                print(f"[PROG] Beginning indexing...")
-                index()
-        # ------------------
+        if cmd[1] == "start":
+            # Check number of params
+            if not check_params(cmd, 3):
+                continue
+    
+            # Change the provider if not connected already or if a different provider was passed to the CLI
+            if web3 == None or cmd[2] != DEFAULT_PROVIDER:
+                web3 = provider_init(cmd[2])
+
+                # If the connection failed skip
+                if web3 == None:
+                    continue
+
+            print("[PROG] Beginning indexing...")
+            index()
+
         elif cmd[1] == "query":
-            query_wallet(cmd[2])
-    # ------------------
+            # Check number of params
+            if not check_params(cmd, 3):
+                continue
+
+            query_wallet(web3, cmd[2])
+   
+        elif cmd[1] == "last":
+            # Check number of params
+            if not check_params(cmd, 2):
+                continue
+
+            print(f"Last indexed block: {get_meta('lastIndexed')}")
+    # ========== quit ==========
     elif cmd[0] == "quit":
         res = input("Are you sure you want to quit? Y/N: ")
         if res == "y" or res == "Y":
             break
-    # ------------------
+    # ========== help ==========
     elif cmd[0] == "help":
         print(
         """Commands:
         help                        - Displays this message.
         erc20index start [RPC]      - Begins indexing using given RPC.
         erc20index query [Wallet]   - Queries given wallet balance
+        erc20index last             - Prints the block number of the last indexed block
         quit                        - Quits the programs
         """)
-    # ------------------
+    # ======== DEFAULT =========
     else:
         print(f"[PROG] Error: Unrecognised command")
